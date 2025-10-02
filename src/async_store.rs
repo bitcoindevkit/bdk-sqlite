@@ -1,12 +1,16 @@
 //! [`Store`] provides async read and write methods of persisting BDK change sets by way of [`sqlx`].
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use bdk_chain::{
     BlockId, ConfirmationBlockTime, DescriptorId, bitcoin, keychain_txout, local_chain, tx_graph,
 };
 use bitcoin::{BlockHash, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid, consensus};
-use sqlx::{Row, sqlite::SqlitePool as Pool};
+use sqlx::{
+    Row,
+    sqlite::{SqliteConnectOptions, SqlitePool as Pool},
+};
 
 /// Store.
 pub struct Store {
@@ -21,9 +25,18 @@ impl Store {
         Self { pool }
     }
 
-    /// New. Panics if `path` does not exist.
+    /// Open a new [`Store`] instance.
+    ///
+    /// This will create a new database at the given path if it doesn't exist.
+    ///
+    /// Note that `path` can be a filename, e.g. `foo.db` or a standard URL,
+    /// e.g. `sqlite://foo.db`.
     pub async fn new(path: &str) -> Self {
-        let pool = Pool::connect(path).await.unwrap();
+        let options = SqliteConnectOptions::from_str(path)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = Pool::connect_with(options).await.unwrap();
+
         Self { pool }
     }
 
