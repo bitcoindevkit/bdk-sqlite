@@ -66,19 +66,24 @@ impl Store {
 
     /// Read changeset.
     pub async fn read_changeset(&self) -> ChangeSet {
-        let mut changeset = ChangeSet::default();
-
-        changeset.network = self.read_network().await;
+        let network = self.read_network().await;
 
         let descriptors = self.read_keychain_descriptors().await;
-        changeset.descriptor = descriptors.get(&KeychainKind::External).cloned();
-        changeset.change_descriptor = descriptors.get(&KeychainKind::Internal).cloned();
+        let descriptor = descriptors.get(&KeychainKind::External).cloned();
+        let change_descriptor = descriptors.get(&KeychainKind::Internal).cloned();
 
-        changeset.tx_graph = self.read_tx_graph().await;
-        changeset.local_chain = self.read_local_chain().await;
-        changeset.indexer = self.read_keychain_txout().await;
+        let tx_graph = self.read_tx_graph().await;
+        let local_chain = self.read_local_chain().await;
+        let indexer = self.read_keychain_txout().await;
 
-        changeset
+        ChangeSet {
+            network,
+            descriptor,
+            change_descriptor,
+            tx_graph,
+            local_chain,
+            indexer,
+        }
     }
 
     /// Read network.
@@ -90,9 +95,9 @@ impl Store {
             .await
             .unwrap();
 
-        row.and_then(|row| {
+        row.map(|row| {
             let network: String = row.get("network");
-            Some(network.parse().unwrap())
+            network.parse().unwrap()
         })
     }
 
@@ -146,6 +151,9 @@ impl AsyncWalletPersister for Store {
     where
         Self: 'a,
     {
-        Box::pin(async { Ok(persister.write_changeset(changeset).await) })
+        Box::pin(async {
+            persister.write_changeset(changeset).await;
+            Ok(())
+        })
     }
 }
