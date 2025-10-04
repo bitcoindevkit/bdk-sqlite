@@ -54,8 +54,6 @@ impl Store {
         &self,
         tx_graph: &tx_graph::ChangeSet<ConfirmationBlockTime>,
     ) -> Result<(), Error> {
-        let mut conn = self.pool.acquire().await?;
-
         let txs = &tx_graph.txs;
         let txouts = &tx_graph.txouts;
         let anchors = &tx_graph.anchors;
@@ -68,28 +66,28 @@ impl Store {
             sqlx::query("insert into tx(txid, tx) values($1, $2)")
                 .bind(txid.to_string())
                 .bind(consensus::encode::serialize(tx))
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
         }
         for (txid, t) in first_seen {
             sqlx::query("insert into tx(txid, first_seen) values($1, $2) on conflict do update set first_seen = $2")
                 .bind(txid.to_string())
                 .bind(i64::try_from(*t)?)
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
         }
         for (txid, t) in last_seen {
             sqlx::query("insert into tx(txid, last_seen) values($1, $2) on conflict do update set last_seen = $2")
                 .bind(txid.to_string())
                 .bind(i64::try_from(*t)?)
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
         }
         for (txid, t) in last_evicted {
             sqlx::query("insert into tx(txid, last_evicted) values($1, $2) on conflict do update set last_evicted = $2")
                 .bind(txid.to_string())
                 .bind(i64::try_from(*t)?)
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
         }
         for (op, txout) in txouts {
@@ -103,7 +101,7 @@ impl Store {
                 .bind(vout)
                 .bind(i64::try_from(value.to_sat())?)
                 .bind(script_pubkey.to_bytes())
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
         }
         for (anchor, txid) in anchors {
@@ -114,7 +112,7 @@ impl Store {
                 .bind(hash.to_string())
                 .bind(txid.to_string())
                 .bind(i64::try_from(confirmation_time)?)
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
         }
 
@@ -126,21 +124,19 @@ impl Store {
         &self,
         local_chain: &local_chain::ChangeSet,
     ) -> Result<(), Error> {
-        let mut conn = self.pool.acquire().await?;
-
         for (&height, hash) in &local_chain.blocks {
             match hash {
                 Some(hash) => {
                     sqlx::query("insert or replace into block(height, hash) values($1, $2)")
                         .bind(height)
                         .bind(hash.to_string())
-                        .execute(&mut *conn)
+                        .execute(&self.pool)
                         .await?;
                 }
                 None => {
                     sqlx::query("delete from block where height = $1")
                         .bind(height)
-                        .execute(&mut *conn)
+                        .execute(&self.pool)
                         .await?;
                 }
             }
@@ -154,15 +150,13 @@ impl Store {
         &self,
         keychain_txout: &keychain_txout::ChangeSet,
     ) -> Result<(), Error> {
-        let mut conn = self.pool.acquire().await?;
-
         for (descriptor_id, last_revealed) in &keychain_txout.last_revealed {
             sqlx::query(
                 "insert or replace into keychain_last_revealed(descriptor_id, last_revealed) values($1, $2)",
             )
             .bind(descriptor_id.to_string())
             .bind(last_revealed)
-            .execute(&mut *conn)
+            .execute(&self.pool)
             .await?;
         }
         for (descriptor_id, spk_cache) in &keychain_txout.spk_cache {
@@ -173,7 +167,7 @@ impl Store {
                 .bind(descriptor_id.to_string())
                 .bind(*derivation_index)
                 .bind(script.to_bytes())
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
             }
         }
@@ -183,12 +177,10 @@ impl Store {
 
     /// Read tx_graph.
     pub async fn read_tx_graph(&self) -> Result<tx_graph::ChangeSet<ConfirmationBlockTime>, Error> {
-        let mut conn = self.pool.acquire().await?;
-
         let mut changeset = tx_graph::ChangeSet::default();
 
         let rows = sqlx::query("select txid, tx, first_seen, last_seen, last_evicted from tx")
-            .fetch_all(&mut *conn)
+            .fetch_all(&self.pool)
             .await?;
         for row in rows {
             let txid: String = row.get("txid");
@@ -206,7 +198,7 @@ impl Store {
         }
 
         let rows = sqlx::query("SELECT txid, vout, value, script FROM txout")
-            .fetch_all(&mut *conn)
+            .fetch_all(&self.pool)
             .await?;
         for row in rows {
             let txid: String = row.get("txid");
@@ -226,7 +218,7 @@ impl Store {
 
         let rows =
             sqlx::query("select block_height, block_hash, txid, confirmation_time from anchor")
-                .fetch_all(&mut *conn)
+                .fetch_all(&self.pool)
                 .await?;
         for row in rows {
             let height: u32 = row.get("block_height");
@@ -247,12 +239,10 @@ impl Store {
 
     /// Read local_chain.
     pub async fn read_local_chain(&self) -> Result<local_chain::ChangeSet, Error> {
-        let mut conn = self.pool.acquire().await?;
-
         let mut changeset = local_chain::ChangeSet::default();
 
         let rows = sqlx::query("select height, hash from block")
-            .fetch_all(&mut *conn)
+            .fetch_all(&self.pool)
             .await?;
         for row in rows {
             let height: u32 = row.get("height");
@@ -266,12 +256,10 @@ impl Store {
 
     /// Read keychain_txout.
     pub async fn read_keychain_txout(&self) -> Result<keychain_txout::ChangeSet, Error> {
-        let mut conn = self.pool.acquire().await?;
-
         let mut changeset = keychain_txout::ChangeSet::default();
 
         let rows = sqlx::query("select descriptor_id, last_revealed from keychain_last_revealed")
-            .fetch_all(&mut *conn)
+            .fetch_all(&self.pool)
             .await?;
         for row in rows {
             let descriptor_id: String = row.get("descriptor_id");
@@ -283,7 +271,7 @@ impl Store {
         let rows = sqlx::query(
             "select descriptor_id, derivation_index, script from keychain_script_pubkey",
         )
-        .fetch_all(&mut *conn)
+        .fetch_all(&self.pool)
         .await?;
 
         for row in rows {

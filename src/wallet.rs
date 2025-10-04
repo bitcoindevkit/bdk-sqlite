@@ -37,11 +37,9 @@ impl Store {
 
     /// Write network.
     pub async fn write_network(&self, network: Network) -> Result<(), Error> {
-        let mut conn = self.pool.acquire().await?;
-
         sqlx::query("insert into network(network) values($1)")
             .bind(network.to_string())
-            .execute(&mut *conn)
+            .execute(&self.pool)
             .await?;
 
         Ok(())
@@ -52,8 +50,6 @@ impl Store {
         &self,
         descriptors: BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>,
     ) -> Result<(), Error> {
-        let mut conn = self.pool.acquire().await?;
-
         for (keychain, descriptor) in descriptors {
             let keychain = match keychain {
                 KeychainKind::External => 0u8,
@@ -62,7 +58,7 @@ impl Store {
             sqlx::query("insert into keychain(keychain, descriptor) values($1, $2)")
                 .bind(keychain)
                 .bind(descriptor.to_string())
-                .execute(&mut *conn)
+                .execute(&self.pool)
                 .await?;
         }
 
@@ -93,10 +89,8 @@ impl Store {
 
     /// Read network.
     pub async fn read_network(&self) -> Result<Option<Network>, Error> {
-        let mut conn = self.pool.acquire().await?;
-
         let row = sqlx::query("select network from network")
-            .fetch_optional(&mut *conn)
+            .fetch_optional(&self.pool)
             .await?;
 
         row.map(|row| {
@@ -110,12 +104,10 @@ impl Store {
     pub async fn read_keychain_descriptors(
         &self,
     ) -> Result<BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>, Error> {
-        let mut conn = self.pool.acquire().await?;
-
         let mut descriptors = BTreeMap::new();
 
         let rows = sqlx::query("select keychain, descriptor from keychain")
-            .fetch_all(&mut *conn)
+            .fetch_all(&self.pool)
             .await?;
         for row in rows {
             let keychain: u8 = row.get("keychain");
