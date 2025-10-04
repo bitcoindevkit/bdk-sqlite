@@ -24,12 +24,16 @@ pub struct Store {
 impl Store {
     /// New in memory.
     pub async fn new_memory() -> Result<Self, Error> {
-        let pool = Pool::connect("sqlite::memory:").await?;
+        let mut options = sqlx::sqlite::SqlitePoolOptions::new();
+        // Don't test the health of the connection before returning it.
+        // See docs for `Pool::acquire`.
+        options = options.test_before_acquire(false);
+        let pool = options.connect("sqlite::memory:").await?;
 
         Ok(Self { pool })
     }
 
-    /// Open a new [`Store`] instance.
+    /// Create a new [`Store`] instance.
     ///
     /// This will create a new database at the given path if it doesn't exist.
     ///
@@ -40,6 +44,13 @@ impl Store {
         let pool = Pool::connect_with(options).await?;
 
         Ok(Self { pool })
+    }
+
+    /// Create a new [`Store`] from an existing [`Pool`].
+    pub async fn new_pool(pool: Pool) -> Result<Self, Error> {
+        let store = Self { pool };
+
+        Ok(store)
     }
 
     /// Migrate.
