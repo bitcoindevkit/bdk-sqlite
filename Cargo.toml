@@ -1,6 +1,6 @@
 [package]
 name = "bdk_sqlite"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Bitcoin Dev Kit Developers"]
 rust-version = "1.85.0"
 edition = "2024"
