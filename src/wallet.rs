@@ -9,13 +9,14 @@ use bitcoin::Network;
 use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 use sqlx::Row;
 
+use crate::Error;
 use crate::Store;
 
 impl Store {
     /// Write changeset.
-    pub async fn write_changeset(&self, changeset: &ChangeSet) {
+    pub async fn write_changeset(&self, changeset: &ChangeSet) -> Result<(), Error> {
         if let Some(network) = changeset.network {
-            self.write_network(network).await;
+            self.write_network(network).await?;
         }
 
         let mut descriptors = BTreeMap::new();
@@ -25,30 +26,33 @@ impl Store {
         if let Some(ref change_descriptor) = changeset.change_descriptor {
             descriptors.insert(KeychainKind::Internal, change_descriptor.clone());
         }
-        self.write_keychain_descriptors(descriptors).await;
+        self.write_keychain_descriptors(descriptors).await?;
 
-        self.write_local_chain(&changeset.local_chain).await;
-        self.write_tx_graph(&changeset.tx_graph).await;
-        self.write_keychain_txout(&changeset.indexer).await;
+        self.write_local_chain(&changeset.local_chain).await?;
+        self.write_tx_graph(&changeset.tx_graph).await?;
+        self.write_keychain_txout(&changeset.indexer).await?;
+
+        Ok(())
     }
 
     /// Write network.
-    pub async fn write_network(&self, network: Network) {
-        let mut conn = self.pool.acquire().await.unwrap();
+    pub async fn write_network(&self, network: Network) -> Result<(), Error> {
+        let mut conn = self.pool.acquire().await?;
 
         sqlx::query("insert into network(network) values($1)")
             .bind(network.to_string())
             .execute(&mut *conn)
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 
     /// Write keychain descriptors.
     pub async fn write_keychain_descriptors(
         &self,
         descriptors: BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>,
-    ) {
-        let mut conn = self.pool.acquire().await.unwrap();
+    ) -> Result<(), Error> {
+        let mut conn = self.pool.acquire().await?;
 
         for (keychain, descriptor) in descriptors {
             let keychain = match keychain {
@@ -59,60 +63,60 @@ impl Store {
                 .bind(keychain)
                 .bind(descriptor.to_string())
                 .execute(&mut *conn)
-                .await
-                .unwrap();
+                .await?;
         }
+
+        Ok(())
     }
 
     /// Read changeset.
-    pub async fn read_changeset(&self) -> ChangeSet {
-        let network = self.read_network().await;
+    pub async fn read_changeset(&self) -> Result<ChangeSet, Error> {
+        let network = self.read_network().await?;
 
-        let descriptors = self.read_keychain_descriptors().await;
+        let descriptors = self.read_keychain_descriptors().await?;
         let descriptor = descriptors.get(&KeychainKind::External).cloned();
         let change_descriptor = descriptors.get(&KeychainKind::Internal).cloned();
 
-        let tx_graph = self.read_tx_graph().await;
-        let local_chain = self.read_local_chain().await;
-        let indexer = self.read_keychain_txout().await;
+        let tx_graph = self.read_tx_graph().await?;
+        let local_chain = self.read_local_chain().await?;
+        let indexer = self.read_keychain_txout().await?;
 
-        ChangeSet {
+        Ok(ChangeSet {
             network,
             descriptor,
             change_descriptor,
             tx_graph,
             local_chain,
             indexer,
-        }
+        })
     }
 
     /// Read network.
-    pub async fn read_network(&self) -> Option<Network> {
-        let mut conn = self.pool.acquire().await.unwrap();
+    pub async fn read_network(&self) -> Result<Option<Network>, Error> {
+        let mut conn = self.pool.acquire().await?;
 
         let row = sqlx::query("select network from network")
             .fetch_optional(&mut *conn)
-            .await
-            .unwrap();
+            .await?;
 
         row.map(|row| {
-            let network: String = row.get("network");
-            network.parse().unwrap()
+            let s: String = row.get("network");
+            s.parse().map_err(Error::ParseNetwork)
         })
+        .transpose()
     }
 
     /// Read keychain descriptors.
     pub async fn read_keychain_descriptors(
         &self,
-    ) -> BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>> {
-        let mut conn = self.pool.acquire().await.unwrap();
+    ) -> Result<BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>, Error> {
+        let mut conn = self.pool.acquire().await?;
 
         let mut descriptors = BTreeMap::new();
 
         let rows = sqlx::query("select keychain, descriptor from keychain")
             .fetch_all(&mut *conn)
-            .await
-            .unwrap();
+            .await?;
         for row in rows {
             let keychain: u8 = row.get("keychain");
             let keychain = match keychain {
@@ -121,26 +125,26 @@ impl Store {
                 _ => panic!("unsupported keychain kind"),
             };
             let descriptor: String = row.get("descriptor");
-            let descriptor = Descriptor::from_str(&descriptor).unwrap();
+            let descriptor = Descriptor::from_str(&descriptor)?;
             descriptors.insert(keychain, descriptor);
         }
 
-        descriptors
+        Ok(descriptors)
     }
 }
 
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + 'a + Send>>;
 
 impl AsyncWalletPersister for Store {
-    type Error = ();
+    type Error = crate::Error;
 
     fn initialize<'a>(persister: &'a mut Self) -> FutureResult<'a, ChangeSet, Self::Error>
     where
         Self: 'a,
     {
         Box::pin(async {
-            persister.migrate().await;
-            Ok(persister.read_changeset().await)
+            persister.migrate().await?;
+            persister.read_changeset().await
         })
     }
 
@@ -151,9 +155,6 @@ impl AsyncWalletPersister for Store {
     where
         Self: 'a,
     {
-        Box::pin(async {
-            persister.write_changeset(changeset).await;
-            Ok(())
-        })
+        Box::pin(async { persister.write_changeset(changeset).await })
     }
 }

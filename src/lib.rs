@@ -4,5 +4,7 @@
 
 mod async_store;
 pub use async_store::*;
+mod error;
+pub use error::*;
 #[cfg(feature = "wallet")]
 mod wallet;

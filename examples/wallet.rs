@@ -19,15 +19,16 @@ const PARALLEL_REQUESTS: usize = 1;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut db = Store::new(DB_PATH).await;
+    let mut db = Store::new(DB_PATH).await?;
 
-    let mut wallet = match Wallet::load().load_wallet_async(&mut db).await.unwrap() {
+    let mut wallet = match Wallet::load().load_wallet_async(&mut db).await? {
         Some(wallet) => wallet,
-        None => Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
-            .network(NETWORK)
-            .create_wallet_async(&mut db)
-            .await
-            .unwrap(),
+        None => {
+            Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
+                .network(NETWORK)
+                .create_wallet_async(&mut db)
+                .await?
+        }
     };
 
     // Scan
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
                 print!("\nScanning keychain [{keychain:?}]");
             }
             print!(" {spk_i:<3}");
-            std::io::stdout().flush().unwrap()
+            std::io::stdout().flush().unwrap();
         }
     });
 
@@ -56,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
         wallet.next_unused_address(KeychainKind::External)
     );
 
-    wallet.persist_async(&mut db).await.unwrap();
+    wallet.persist_async(&mut db).await?;
 
     for canon_tx in wallet.transactions() {
         println!("{}", canon_tx.tx_node.txid);
