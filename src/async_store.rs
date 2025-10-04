@@ -15,6 +15,7 @@ use sqlx::{
 use crate::Error;
 
 /// Store.
+#[derive(Debug)]
 pub struct Store {
     /// Pool.
     pub(crate) pool: Pool,
