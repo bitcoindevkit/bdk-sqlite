@@ -1,11 +1,11 @@
-DROP TABLE IF EXISTS network;
-DROP TABLE IF EXISTS keychain;
-DROP TABLE IF EXISTS keychain_last_revealed;
-DROP TABLE IF EXISTS keychain_script_pubkey;
 DROP TABLE IF EXISTS block;
 DROP TABLE IF EXISTS tx;
 DROP TABLE IF EXISTS txout;
 DROP TABLE IF EXISTS anchor;
+DROP TABLE IF EXISTS keychain_last_revealed;
+DROP TABLE IF EXISTS keychain_script_pubkey;
+DROP TABLE IF EXISTS keychain;
+DROP TABLE IF EXISTS network;
 
 -- Block table
 CREATE TABLE IF NOT EXISTS block(
