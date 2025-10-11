@@ -114,7 +114,10 @@ impl Store {
             let keychain = match keychain {
                 0 => KeychainKind::External,
                 1 => KeychainKind::Internal,
-                _ => panic!("unsupported keychain kind"),
+                _ => {
+                    debug_assert!(false, "keychain must map to a value of 0 or 1");
+                    continue;
+                }
             };
             let descriptor: String = row.get("descriptor");
             let descriptor = Descriptor::from_str(&descriptor)?;
