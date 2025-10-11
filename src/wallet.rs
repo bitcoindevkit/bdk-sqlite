@@ -37,7 +37,7 @@ impl Store {
 
     /// Write network.
     pub async fn write_network(&self, network: Network) -> Result<(), Error> {
-        sqlx::query("insert into network(network) values($1)")
+        sqlx::query("INSERT OR IGNORE INTO network(network) VALUES($1)")
             .bind(network.to_string())
             .execute(&self.pool)
             .await?;
@@ -55,7 +55,7 @@ impl Store {
                 KeychainKind::External => 0u8,
                 KeychainKind::Internal => 1,
             };
-            sqlx::query("insert into keychain(keychain, descriptor) values($1, $2)")
+            sqlx::query("INSERT OR IGNORE INTO keychain(keychain, descriptor) VALUES($1, $2)")
                 .bind(keychain)
                 .bind(descriptor.to_string())
                 .execute(&self.pool)
@@ -89,7 +89,7 @@ impl Store {
 
     /// Read network.
     pub async fn read_network(&self) -> Result<Option<Network>, Error> {
-        let row = sqlx::query("select network from network")
+        let row = sqlx::query("SELECT network FROM network")
             .fetch_optional(&self.pool)
             .await?;
 
@@ -106,7 +106,7 @@ impl Store {
     ) -> Result<BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>, Error> {
         let mut descriptors = BTreeMap::new();
 
-        let rows = sqlx::query("select keychain, descriptor from keychain")
+        let rows = sqlx::query("SELECT keychain, descriptor FROM keychain")
             .fetch_all(&self.pool)
             .await?;
         for row in rows {

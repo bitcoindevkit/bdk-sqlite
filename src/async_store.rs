@@ -74,28 +74,30 @@ impl Store {
 
         for tx in txs {
             let txid = tx.compute_txid();
-            sqlx::query("insert into tx(txid, tx) values($1, $2)")
-                .bind(txid.to_string())
-                .bind(consensus::encode::serialize(tx))
-                .execute(&self.pool)
-                .await?;
+            sqlx::query(
+                "INSERT INTO tx(txid, tx) VALUES($1, $2) ON CONFLICT DO UPDATE SET tx = $2",
+            )
+            .bind(txid.to_string())
+            .bind(consensus::encode::serialize(tx))
+            .execute(&self.pool)
+            .await?;
         }
         for (txid, t) in first_seen {
-            sqlx::query("insert into tx(txid, first_seen) values($1, $2) on conflict do update set first_seen = $2")
+            sqlx::query("INSERT INTO tx(txid, first_seen) VALUES($1, $2) ON CONFLICT DO UPDATE SET first_seen = $2")
                 .bind(txid.to_string())
                 .bind(i64::try_from(*t)?)
                 .execute(&self.pool)
                 .await?;
         }
         for (txid, t) in last_seen {
-            sqlx::query("insert into tx(txid, last_seen) values($1, $2) on conflict do update set last_seen = $2")
+            sqlx::query("INSERT INTO tx(txid, last_seen) VALUES($1, $2) ON CONFLICT DO UPDATE SET last_seen = $2")
                 .bind(txid.to_string())
                 .bind(i64::try_from(*t)?)
                 .execute(&self.pool)
                 .await?;
         }
         for (txid, t) in last_evicted {
-            sqlx::query("insert into tx(txid, last_evicted) values($1, $2) on conflict do update set last_evicted = $2")
+            sqlx::query("INSERT INTO tx(txid, last_evicted) VALUES($1, $2) ON CONFLICT DO UPDATE SET last_evicted = $2")
                 .bind(txid.to_string())
                 .bind(i64::try_from(*t)?)
                 .execute(&self.pool)
@@ -107,7 +109,7 @@ impl Store {
                 value,
                 script_pubkey,
             } = txout;
-            sqlx::query("insert into txout(txid, vout, value, script) values($1, $2, $3, $4)")
+            sqlx::query("INSERT INTO txout(txid, vout, value, script) VALUES($1, $2, $3, $4) ON CONFLICT DO UPDATE SET value = $3, script = $4")
                 .bind(txid.to_string())
                 .bind(vout)
                 .bind(i64::try_from(value.to_sat())?)
@@ -118,7 +120,7 @@ impl Store {
         for (anchor, txid) in anchors {
             let BlockId { height, hash } = anchor.block_id;
             let confirmation_time = anchor.confirmation_time;
-            sqlx::query("insert into anchor(block_height, block_hash, txid, confirmation_time) values($1, $2, $3, $4)")
+            sqlx::query("INSERT OR IGNORE INTO anchor(block_height, block_hash, txid, confirmation_time) VALUES($1, $2, $3, $4)")
                 .bind(height)
                 .bind(hash.to_string())
                 .bind(txid.to_string())
@@ -138,14 +140,14 @@ impl Store {
         for (&height, hash) in &local_chain.blocks {
             match hash {
                 Some(hash) => {
-                    sqlx::query("insert or replace into block(height, hash) values($1, $2)")
+                    sqlx::query("INSERT OR IGNORE INTO block(height, hash) VALUES($1, $2)")
                         .bind(height)
                         .bind(hash.to_string())
                         .execute(&self.pool)
                         .await?;
                 }
                 None => {
-                    sqlx::query("delete from block where height = $1")
+                    sqlx::query("DELETE FROM block WHERE height = $1")
                         .bind(height)
                         .execute(&self.pool)
                         .await?;
@@ -163,7 +165,7 @@ impl Store {
     ) -> Result<(), Error> {
         for (descriptor_id, last_revealed) in &keychain_txout.last_revealed {
             sqlx::query(
-                "insert or replace into keychain_last_revealed(descriptor_id, last_revealed) values($1, $2)",
+                "INSERT INTO keychain_last_revealed(descriptor_id, last_revealed) VALUES($1, $2) ON CONFLICT DO UPDATE SET last_revealed = $2",
             )
             .bind(descriptor_id.to_string())
             .bind(last_revealed)
@@ -173,7 +175,7 @@ impl Store {
         for (descriptor_id, spk_cache) in &keychain_txout.spk_cache {
             for (derivation_index, script) in spk_cache {
                 sqlx::query(
-                    "insert or replace into keychain_script_pubkey(descriptor_id, derivation_index, script) values($1, $2, $3)",
+                    "INSERT OR IGNORE INTO keychain_script_pubkey(descriptor_id, derivation_index, script) VALUES($1, $2, $3)",
                 )
                 .bind(descriptor_id.to_string())
                 .bind(*derivation_index)
@@ -190,7 +192,7 @@ impl Store {
     pub async fn read_tx_graph(&self) -> Result<tx_graph::ChangeSet<ConfirmationBlockTime>, Error> {
         let mut changeset = tx_graph::ChangeSet::default();
 
-        let rows = sqlx::query("select txid, tx, first_seen, last_seen, last_evicted from tx")
+        let rows = sqlx::query("SELECT txid, tx, first_seen, last_seen, last_evicted FROM tx")
             .fetch_all(&self.pool)
             .await?;
         for row in rows {
@@ -228,7 +230,7 @@ impl Store {
         }
 
         let rows =
-            sqlx::query("select block_height, block_hash, txid, confirmation_time from anchor")
+            sqlx::query("SELECT block_height, block_hash, txid, confirmation_time FROM anchor")
                 .fetch_all(&self.pool)
                 .await?;
         for row in rows {
@@ -252,7 +254,7 @@ impl Store {
     pub async fn read_local_chain(&self) -> Result<local_chain::ChangeSet, Error> {
         let mut changeset = local_chain::ChangeSet::default();
 
-        let rows = sqlx::query("select height, hash from block")
+        let rows = sqlx::query("SELECT height, hash FROM block")
             .fetch_all(&self.pool)
             .await?;
         for row in rows {
@@ -269,7 +271,7 @@ impl Store {
     pub async fn read_keychain_txout(&self) -> Result<keychain_txout::ChangeSet, Error> {
         let mut changeset = keychain_txout::ChangeSet::default();
 
-        let rows = sqlx::query("select descriptor_id, last_revealed from keychain_last_revealed")
+        let rows = sqlx::query("SELECT descriptor_id, last_revealed FROM keychain_last_revealed")
             .fetch_all(&self.pool)
             .await?;
         for row in rows {
@@ -280,7 +282,7 @@ impl Store {
         }
 
         let rows = sqlx::query(
-            "select descriptor_id, derivation_index, script from keychain_script_pubkey",
+            "SELECT descriptor_id, derivation_index, script FROM keychain_script_pubkey",
         )
         .fetch_all(&self.pool)
         .await?;
