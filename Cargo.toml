@@ -20,6 +20,7 @@ sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio"] }
 anyhow = "1"
 bdk_esplora = { version = "0.22.1", features = ["tokio"] }
 tokio = { version = "1", default-features = false, features = ["full"] }
+bdk_wallet = { version = "2.3.0", features = ["test-utils"] }
 
 [dev-dependencies.bdk_sqlite]
 path = "."
@@ -27,8 +28,11 @@ features = ["wallet"]
 
 [features]
 default = ["wallet"]
-wallet = ["dep:bdk_wallet"]
-
+wallet = ["bdk_wallet"]
 
 [[example]]
 name = "wallet"
+
+[patch.crates-io.bdk_wallet]
+git = "https://github.com/ValuedMammal/bdk_wallet"
+branch = "persist_test_utils_2_3_0"
