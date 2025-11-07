@@ -207,7 +207,9 @@ impl Store {
             changeset.txs.insert(Arc::new(tx));
             changeset.first_seen.insert(txid, first_seen.try_into()?);
             changeset.last_seen.insert(txid, last_seen.try_into()?);
-            changeset.last_seen.insert(txid, last_evicted.try_into()?);
+            changeset
+                .last_evicted
+                .insert(txid, last_evicted.try_into()?);
         }
 
         let rows = sqlx::query("SELECT txid, vout, value, script FROM txout")
