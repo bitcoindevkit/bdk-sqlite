@@ -140,11 +140,20 @@ impl Store {
         for (&height, hash) in &local_chain.blocks {
             match hash {
                 Some(hash) => {
-                    sqlx::query("INSERT OR IGNORE INTO block(height, hash) VALUES($1, $2)")
+                    // Avoid inserting new rows of existing height.
+                    // FIXME: The correct way to handle this is to have a unique constraint on `height`
+                    // in the block table schema.
+                    let row_option = sqlx::query("SELECT height FROM block WHERE height = $1")
                         .bind(height)
-                        .bind(hash.to_string())
-                        .execute(&self.pool)
+                        .fetch_optional(&self.pool)
                         .await?;
+                    if row_option.is_none() {
+                        sqlx::query("INSERT OR IGNORE INTO block(height, hash) VALUES($1, $2)")
+                            .bind(height)
+                            .bind(hash.to_string())
+                            .execute(&self.pool)
+                            .await?;
+                    }
                 }
                 None => {
                     sqlx::query("DELETE FROM block WHERE height = $1")
