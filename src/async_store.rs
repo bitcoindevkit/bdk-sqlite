@@ -140,11 +140,20 @@ impl Store {
         for (&height, hash) in &local_chain.blocks {
             match hash {
                 Some(hash) => {
-                    sqlx::query("INSERT OR IGNORE INTO block(height, hash) VALUES($1, $2)")
+                    // Avoid inserting new rows of existing height.
+                    // FIXME: The correct way to handle this is to have a unique constraint on `height`
+                    // in the block table schema.
+                    let row_option = sqlx::query("SELECT height FROM block WHERE height = $1")
                         .bind(height)
-                        .bind(hash.to_string())
-                        .execute(&self.pool)
+                        .fetch_optional(&self.pool)
                         .await?;
+                    if row_option.is_none() {
+                        sqlx::query("INSERT OR IGNORE INTO block(height, hash) VALUES($1, $2)")
+                            .bind(height)
+                            .bind(hash.to_string())
+                            .execute(&self.pool)
+                            .await?;
+                    }
                 }
                 None => {
                     sqlx::query("DELETE FROM block WHERE height = $1")
@@ -303,5 +312,72 @@ impl Store {
         }
 
         Ok(changeset)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use bitcoin::hashes::Hash;
+
+    #[tokio::test]
+    async fn block_table_height_is_unique() -> anyhow::Result<()> {
+        let mut cs = local_chain::ChangeSet::default();
+        cs.blocks.insert(0, Some(Hash::hash(b"0")));
+        cs.blocks.insert(1, Some(Hash::hash(b"1")));
+
+        let store = Store::new_memory().await?;
+        store.migrate().await?;
+        store
+            .write_local_chain(&cs)
+            .await
+            .expect("failed to write `local_chain`");
+
+        // Trying to replace the value of existing height should be ignored.
+        cs.blocks.insert(1, Some(Hash::hash(b"1a")));
+
+        store
+            .write_local_chain(&cs)
+            .await
+            .expect("failed to write `local_chain`");
+
+        let rows = sqlx::query("SELECT height, hash FROM block WHERE height = 1")
+            .fetch_all(&store.pool)
+            .await?;
+
+        assert_eq!(rows.len(), 1, "Expected 1 block row");
+
+        let row = rows.first().unwrap();
+        let row_hash: String = row.get("hash");
+        let expected_hash: BlockHash = Hash::hash(b"1");
+        assert_eq!(row_hash, expected_hash.to_string());
+
+        // Delete row 1 and insert hash "1a" again.
+        let mut cs = local_chain::ChangeSet::default();
+        cs.blocks.insert(1, None);
+        store
+            .write_local_chain(&cs)
+            .await
+            .expect("failed to write `local_chain`");
+
+        cs.blocks.insert(1, Some(Hash::hash(b"1a")));
+        store
+            .write_local_chain(&cs)
+            .await
+            .expect("failed to write `local_chain`");
+
+        let rows = sqlx::query("SELECT height, hash FROM block WHERE height = 1")
+            .fetch_all(&store.pool)
+            .await?;
+
+        // Row hash should change to "1a".
+        assert_eq!(rows.len(), 1, "Expected 1 block row");
+        let row = rows.first().unwrap();
+        let row_hash: String = row.get("hash");
+        let expected_hash: BlockHash = Hash::hash(b"1a");
+        assert_eq!(row_hash, expected_hash.to_string());
+
+        Ok(())
     }
 }
