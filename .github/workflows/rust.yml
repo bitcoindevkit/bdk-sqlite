@@ -12,7 +12,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
+    - name: Check features
+      run: |
+        cargo check --no-default-features
+        cargo check --no-default-features --features wallet
     - name: Build
       run: cargo build
     - name: Test
-      run: cargo test
+      run: cargo test --no-fail-fast
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Rustfmt
+      run: cargo fmt --all --check
+    - name: Lint
+      run: cargo clippy --all-targets --all-features -- -D warnings
