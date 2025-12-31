@@ -53,8 +53,8 @@ impl Store {
         Ok(store)
     }
 
-    /// Migrate.
-    pub(crate) async fn migrate(&self) -> Result<(), Error> {
+    /// Runs pending migrations against the database.
+    pub async fn migrate(&self) -> Result<(), Error> {
         Ok(sqlx::migrate!().run(&self.pool).await?)
     }
 }
