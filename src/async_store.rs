@@ -201,24 +201,27 @@ impl Store {
     pub async fn read_tx_graph(&self) -> Result<tx_graph::ChangeSet<ConfirmationBlockTime>, Error> {
         let mut changeset = tx_graph::ChangeSet::default();
 
-        let rows = sqlx::query("SELECT txid, tx, first_seen, last_seen, last_evicted FROM tx")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows: Vec<TxRow> =
+            sqlx::query_as("SELECT txid, tx, first_seen, last_seen, last_evicted FROM tx")
+                .fetch_all(&self.pool)
+                .await?;
         for row in rows {
-            let txid: String = row.get("txid");
-            let txid: Txid = txid.parse()?;
-            let data: Vec<u8> = row.get("tx");
-            let tx: Transaction = consensus::encode::deserialize(&data)?;
-            let first_seen: i64 = row.get("first_seen");
-            let last_seen: i64 = row.get("last_seen");
-            let last_evicted: i64 = row.get("last_evicted");
-
-            changeset.txs.insert(Arc::new(tx));
-            changeset.first_seen.insert(txid, first_seen.try_into()?);
-            changeset.last_seen.insert(txid, last_seen.try_into()?);
-            changeset
-                .last_evicted
-                .insert(txid, last_evicted.try_into()?);
+            let txid: Txid = row.txid.parse()?;
+            if let Some(data) = row.tx {
+                let tx: Transaction = consensus::encode::deserialize(&data)?;
+                changeset.txs.insert(Arc::new(tx));
+            }
+            if let Some(first_seen) = row.first_seen {
+                changeset.first_seen.insert(txid, first_seen.try_into()?);
+            }
+            if let Some(last_seen) = row.last_seen {
+                changeset.last_seen.insert(txid, last_seen.try_into()?);
+            }
+            if let Some(last_evicted) = row.last_evicted {
+                changeset
+                    .last_evicted
+                    .insert(txid, last_evicted.try_into()?);
+            }
         }
 
         let rows = sqlx::query("SELECT txid, vout, value, script FROM txout")
@@ -313,6 +316,21 @@ impl Store {
 
         Ok(changeset)
     }
+}
+
+/// Represents a row in the tx table.
+#[derive(Debug, sqlx::FromRow)]
+struct TxRow {
+    /// Txid
+    txid: String,
+    /// Raw transaction
+    tx: Option<Vec<u8>>,
+    /// First seen
+    first_seen: Option<i64>,
+    /// Last seen
+    last_seen: Option<i64>,
+    /// Last evicted
+    last_evicted: Option<i64>,
 }
 
 #[cfg(test)]
