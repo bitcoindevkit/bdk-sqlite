@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Features
 
-* `wallet` - Provides access to the [`AsyncWalletPersister`] implementation for [`Store`] (enabled by default).
+* `wallet` - Provides access to the [`AsyncWalletPersister`] implementation for [`Store`]. This feature is enabled by default.
 
 ## MSRV
 
