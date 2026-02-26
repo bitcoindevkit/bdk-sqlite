@@ -153,3 +153,18 @@ impl AsyncWalletPersister for Store {
         Box::pin(async { persister.write_changeset(changeset).await })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use bdk_wallet::persist_test_utils::persist_wallet_changeset_async;
+
+    #[tokio::test]
+    async fn test_async_wallet_persister() -> anyhow::Result<()> {
+        persist_wallet_changeset_async::<_, Store>(async || Ok(Store::new_memory().await?))
+            .await
+            .expect("failed test persist wallet changeset");
+
+        Ok(())
+    }
+}
