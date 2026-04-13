@@ -4,8 +4,9 @@ use std::{collections::BTreeMap, pin::Pin, str::FromStr};
 
 use bdk_chain::bitcoin;
 use bdk_chain::miniscript;
-use bdk_wallet::{AsyncWalletPersister, ChangeSet, KeychainKind};
+use bdk_wallet::{AsyncWalletPersister, ChangeSet, KeychainKind, locked_outpoints};
 use bitcoin::Network;
+use bitcoin::OutPoint;
 use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 use sqlx::Row;
 
@@ -31,6 +32,8 @@ impl Store {
         self.write_local_chain(&changeset.local_chain).await?;
         self.write_tx_graph(&changeset.tx_graph).await?;
         self.write_keychain_txout(&changeset.indexer).await?;
+        self.write_locked_outpoints(&changeset.locked_outpoints)
+            .await?;
 
         Ok(())
     }
@@ -76,6 +79,7 @@ impl Store {
         let tx_graph = self.read_tx_graph().await?;
         let local_chain = self.read_local_chain().await?;
         let indexer = self.read_keychain_txout().await?;
+        let locked_outpoints = self.read_locked_outpoints().await?;
 
         Ok(ChangeSet {
             network,
@@ -84,6 +88,7 @@ impl Store {
             tx_graph,
             local_chain,
             indexer,
+            locked_outpoints,
         })
     }
 
@@ -125,6 +130,49 @@ impl Store {
         }
 
         Ok(descriptors)
+    }
+
+    /// Write locked outpoints.
+    pub async fn write_locked_outpoints(
+        &self,
+        locked_outpoints: &locked_outpoints::ChangeSet,
+    ) -> Result<(), Error> {
+        for (&outpoint, &is_locked) in &locked_outpoints.outpoints {
+            let OutPoint { txid, vout } = outpoint;
+            if is_locked {
+                sqlx::query("INSERT OR IGNORE INTO locked_outpoint(txid, vout) VALUES($1, $2)")
+                    .bind(txid.to_string())
+                    .bind(vout)
+                    .execute(&self.pool)
+                    .await?;
+            } else {
+                sqlx::query("DELETE FROM locked_outpoint WHERE txid = $1 AND vout = $2")
+                    .bind(txid.to_string())
+                    .bind(vout)
+                    .execute(&self.pool)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Read locked outpoints.
+    pub async fn read_locked_outpoints(&self) -> Result<locked_outpoints::ChangeSet, Error> {
+        let mut changeset = locked_outpoints::ChangeSet::default();
+
+        let rows = sqlx::query("SELECT txid, vout FROM locked_outpoint")
+            .fetch_all(&self.pool)
+            .await?;
+        for row in rows {
+            let txid: String = row.get("txid");
+            let txid: bitcoin::Txid = txid.parse()?;
+            let vout: u32 = row.get("vout");
+            let outpoint = OutPoint { txid, vout };
+            changeset.outpoints.insert(outpoint, true);
+        }
+
+        Ok(changeset)
     }
 }
 
