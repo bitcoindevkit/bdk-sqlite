@@ -42,7 +42,7 @@ impl Store {
 
     /// Write network.
     pub async fn write_network(conn: &mut SqliteConnection, network: Network) -> Result<(), Error> {
-        sqlx::query("INSERT OR IGNORE INTO network(network) VALUES($1)")
+        sqlx::query("INSERT OR IGNORE INTO network(id, network) VALUES(0, $1)")
             .bind(network.to_string())
             .execute(&mut *conn)
             .await?;
@@ -206,5 +206,33 @@ impl AsyncWalletPersister for Store {
         Self: 'a,
     {
         Box::pin(async { persister.write_changeset(changeset).await })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use bitcoin::Network;
+
+    #[tokio::test]
+    async fn network_table_has_at_most_one_row() -> anyhow::Result<()> {
+        let store = Store::new_memory().await?;
+        store.migrate().await?;
+
+        {
+            let mut txn = store.pool.begin().await?;
+            Store::write_network(&mut txn, Network::Bitcoin).await?;
+            Store::write_network(&mut txn, Network::Bitcoin).await?;
+            txn.commit().await?;
+        }
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM network")
+            .fetch_one(&store.pool)
+            .await?;
+
+        assert_eq!(count, 1, "network table should have at most 1 row");
+
+        Ok(())
     }
 }
