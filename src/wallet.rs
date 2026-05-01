@@ -8,7 +8,7 @@ use bdk_wallet::{AsyncWalletPersister, ChangeSet, KeychainKind, locked_outpoints
 use bitcoin::Network;
 use bitcoin::OutPoint;
 use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
-use sqlx::Row;
+use sqlx::{Row, sqlite::SqliteConnection};
 
 use crate::Error;
 use crate::Store;
@@ -16,8 +16,10 @@ use crate::Store;
 impl Store {
     /// Write changeset.
     pub async fn write_changeset(&self, changeset: &ChangeSet) -> Result<(), Error> {
+        let mut txn = self.pool.begin().await?;
+
         if let Some(network) = changeset.network {
-            self.write_network(network).await?;
+            Self::write_network(&mut txn, network).await?;
         }
 
         let mut descriptors = BTreeMap::new();
@@ -27,22 +29,22 @@ impl Store {
         if let Some(ref change_descriptor) = changeset.change_descriptor {
             descriptors.insert(KeychainKind::Internal, change_descriptor.clone());
         }
-        self.write_keychain_descriptors(descriptors).await?;
+        Self::write_keychain_descriptors(&mut txn, descriptors).await?;
 
-        self.write_local_chain(&changeset.local_chain).await?;
-        self.write_tx_graph(&changeset.tx_graph).await?;
-        self.write_keychain_txout(&changeset.indexer).await?;
-        self.write_locked_outpoints(&changeset.locked_outpoints)
-            .await?;
+        Self::write_local_chain(&mut txn, &changeset.local_chain).await?;
+        Self::write_tx_graph(&mut txn, &changeset.tx_graph).await?;
+        Self::write_keychain_txout(&mut txn, &changeset.indexer).await?;
+        Self::write_locked_outpoints(&mut txn, &changeset.locked_outpoints).await?;
 
+        txn.commit().await?;
         Ok(())
     }
 
     /// Write network.
-    pub async fn write_network(&self, network: Network) -> Result<(), Error> {
+    pub async fn write_network(conn: &mut SqliteConnection, network: Network) -> Result<(), Error> {
         sqlx::query("INSERT OR IGNORE INTO network(network) VALUES($1)")
             .bind(network.to_string())
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
 
         Ok(())
@@ -50,7 +52,7 @@ impl Store {
 
     /// Write keychain descriptors.
     pub async fn write_keychain_descriptors(
-        &self,
+        conn: &mut SqliteConnection,
         descriptors: BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>,
     ) -> Result<(), Error> {
         for (keychain, descriptor) in descriptors {
@@ -61,7 +63,7 @@ impl Store {
             sqlx::query("INSERT OR IGNORE INTO keychain(keychain, descriptor) VALUES($1, $2)")
                 .bind(keychain)
                 .bind(descriptor.to_string())
-                .execute(&self.pool)
+                .execute(&mut *conn)
                 .await?;
         }
 
@@ -70,17 +72,20 @@ impl Store {
 
     /// Read changeset.
     pub async fn read_changeset(&self) -> Result<ChangeSet, Error> {
-        let network = self.read_network().await?;
+        let mut txn = self.pool.begin().await?;
 
-        let descriptors = self.read_keychain_descriptors().await?;
+        let network = Self::read_network(&mut txn).await?;
+
+        let descriptors = Self::read_keychain_descriptors(&mut txn).await?;
         let descriptor = descriptors.get(&KeychainKind::External).cloned();
         let change_descriptor = descriptors.get(&KeychainKind::Internal).cloned();
 
-        let tx_graph = self.read_tx_graph().await?;
-        let local_chain = self.read_local_chain().await?;
-        let indexer = self.read_keychain_txout().await?;
-        let locked_outpoints = self.read_locked_outpoints().await?;
+        let tx_graph = Self::read_tx_graph(&mut txn).await?;
+        let local_chain = Self::read_local_chain(&mut txn).await?;
+        let indexer = Self::read_keychain_txout(&mut txn).await?;
+        let locked_outpoints = Self::read_locked_outpoints(&mut txn).await?;
 
+        txn.commit().await?;
         Ok(ChangeSet {
             network,
             descriptor,
@@ -93,9 +98,9 @@ impl Store {
     }
 
     /// Read network.
-    pub async fn read_network(&self) -> Result<Option<Network>, Error> {
+    pub async fn read_network(conn: &mut SqliteConnection) -> Result<Option<Network>, Error> {
         let row = sqlx::query("SELECT network FROM network")
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *conn)
             .await?;
 
         row.map(|row| {
@@ -107,12 +112,12 @@ impl Store {
 
     /// Read keychain descriptors.
     pub async fn read_keychain_descriptors(
-        &self,
+        conn: &mut SqliteConnection,
     ) -> Result<BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>, Error> {
         let mut descriptors = BTreeMap::new();
 
         let rows = sqlx::query("SELECT keychain, descriptor FROM keychain")
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *conn)
             .await?;
         for row in rows {
             let keychain: u8 = row.get("keychain");
@@ -134,7 +139,7 @@ impl Store {
 
     /// Write locked outpoints.
     pub async fn write_locked_outpoints(
-        &self,
+        conn: &mut SqliteConnection,
         locked_outpoints: &locked_outpoints::ChangeSet,
     ) -> Result<(), Error> {
         for (&outpoint, &is_locked) in &locked_outpoints.outpoints {
@@ -143,13 +148,13 @@ impl Store {
                 sqlx::query("INSERT OR IGNORE INTO locked_outpoint(txid, vout) VALUES($1, $2)")
                     .bind(txid.to_string())
                     .bind(vout)
-                    .execute(&self.pool)
+                    .execute(&mut *conn)
                     .await?;
             } else {
                 sqlx::query("DELETE FROM locked_outpoint WHERE txid = $1 AND vout = $2")
                     .bind(txid.to_string())
                     .bind(vout)
-                    .execute(&self.pool)
+                    .execute(&mut *conn)
                     .await?;
             }
         }
@@ -158,11 +163,13 @@ impl Store {
     }
 
     /// Read locked outpoints.
-    pub async fn read_locked_outpoints(&self) -> Result<locked_outpoints::ChangeSet, Error> {
+    pub async fn read_locked_outpoints(
+        conn: &mut SqliteConnection,
+    ) -> Result<locked_outpoints::ChangeSet, Error> {
         let mut changeset = locked_outpoints::ChangeSet::default();
 
         let rows = sqlx::query("SELECT txid, vout FROM locked_outpoint")
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *conn)
             .await?;
         for row in rows {
             let txid: String = row.get("txid");
