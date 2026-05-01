@@ -29,7 +29,7 @@ impl Store {
         if let Some(ref change_descriptor) = changeset.change_descriptor {
             descriptors.insert(KeychainKind::Internal, change_descriptor.clone());
         }
-        Self::write_keychain_descriptors(&mut txn, descriptors).await?;
+        Self::write_keychain_descriptors(&mut txn, &descriptors).await?;
 
         Self::write_local_chain(&mut txn, &changeset.local_chain).await?;
         Self::write_tx_graph(&mut txn, &changeset.tx_graph).await?;
@@ -53,7 +53,7 @@ impl Store {
     /// Write keychain descriptors.
     pub async fn write_keychain_descriptors(
         conn: &mut SqliteConnection,
-        descriptors: BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>,
+        descriptors: &BTreeMap<KeychainKind, Descriptor<DescriptorPublicKey>>,
     ) -> Result<(), Error> {
         for (keychain, descriptor) in descriptors {
             let keychain = match keychain {
