@@ -213,6 +213,7 @@ impl AsyncWalletPersister for Store {
 mod test {
     use super::*;
 
+    use bdk_wallet::persist_test_utils::*;
     use bitcoin::Network;
 
     #[tokio::test]
@@ -232,6 +233,33 @@ mod test {
             .await?;
 
         assert_eq!(count, 1, "network table should have at most 1 row");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_async_wallet_persister_network() -> anyhow::Result<()> {
+        persist_network_async::<_, Store>(async || Ok(Store::new_memory().await?))
+            .await
+            .expect("failed test persist wallet changeset");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_async_wallet_persister_keychains() -> anyhow::Result<()> {
+        persist_keychains_async::<_, Store>(async || Ok(Store::new_memory().await?))
+            .await
+            .expect("failed test persist wallet changeset");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_async_wallet_persister() -> anyhow::Result<()> {
+        persist_wallet_changeset_async::<_, Store>(async || Ok(Store::new_memory().await?))
+            .await
+            .expect("failed test persist wallet changeset");
 
         Ok(())
     }
